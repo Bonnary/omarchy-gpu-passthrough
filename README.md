@@ -15,8 +15,11 @@ This is the GPU/VM portion only — not the entire Omarchy Linux distribution.
 - `bin/omarchy-gpu-passthrough-utils` — shared library
 - `bin/omarchy-looking-glass-install` — Looking Glass installer
 - `bin/omarchy-looking-glass-launch` — Looking Glass client launcher
-- `bin/omarchy-windows-vm` — Windows VM management (GPU passthrough + Looking Glass)
-- `bin/omarchy-snapshot` — snapshot helper (modified by the PR)
+- `bin/omarchy-windows-passthrough-vm` — Windows VM management (GPU passthrough + Looking Glass)
+
+Installation notes for Omarchy 4+ (`quattro`): these scripts use Omarchy's built-in
+`omarchy-snapshot` and `omarchy-version` commands, and are renamed (`*-passthrough-*`)
+to avoid shadowing Omarchy 4's official `omarchy-windows-vm` (Docker/RDP VM).
 
 ## Quick start
 
@@ -27,8 +30,8 @@ omarchy-gpu-passthrough info detect     # verify hardware compatibility
 omarchy-gpu-passthrough setup           # run setup wizard
 sudo reboot                             # apply kernel parameters
 omarchy-gpu-passthrough info verify     # confirm configuration
-omarchy-windows-vm install              # install Windows VM (~20 min)
-omarchy-windows-vm launch --lg          # launch via Looking Glass
+omarchy-windows-passthrough-vm install              # install Windows VM (~20 min)
+omarchy-windows-passthrough-vm launch --lg          # launch via Looking Glass
 ```
 
 See the [PR description](https://github.com/omacom/omarchy/pull/3454) for

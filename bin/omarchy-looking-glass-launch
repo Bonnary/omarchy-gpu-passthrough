@@ -4,7 +4,7 @@
 # Preserve original script arguments for exec sg kvm (group refresh)
 ORIGINAL_SCRIPT_ARGS=("$@")
 
-SPICE_DIR="/var/run/omarchy-windows"      # SPICE socket directory (tmpfs, auto-cleaned on reboot)
+SPICE_DIR="/var/run/omarchy-windows-passthrough"      # SPICE socket directory (tmpfs, auto-cleaned on reboot)
 SPICE_SOCKET_PATH="$SPICE_DIR/spice.sock" # SPICE Unix socket
 
 msg_error() {
@@ -170,7 +170,7 @@ check_docker_running() {
 }
 
 get_container_status() {
-  local container_name="${1:-omarchy-windows}"
+  local container_name="${1:-omarchy-windows-passthrough}"
   docker inspect --format='{{.State.Status}}' "$container_name" 2>/dev/null
 }
 
@@ -224,7 +224,7 @@ fi
 COMPOSE_FILE="$HOME/.config/windows/docker-compose.yml"
 if [[ ! -f "$COMPOSE_FILE" ]]; then
   msg_error "Windows VM not configured"
-  echo "   Run: omarchy-windows-vm install"
+  echo "   Run: omarchy-windows-passthrough-vm install"
   exit 1
 fi
 
@@ -232,11 +232,11 @@ if ! grep -q "ivshmem-plain" "$COMPOSE_FILE"; then
   msg_error "Windows VM is not configured with Looking Glass support!"
   echo "   Your VM was installed without IVSHMEM device."
   echo "   To enable Looking Glass, you need to reinstall:"
-  echo "     omarchy-windows-vm remove"
-  echo "     omarchy-windows-vm install"
+  echo "     omarchy-windows-passthrough-vm remove"
+  echo "     omarchy-windows-passthrough-vm install"
   echo "   During installation, select 'Yes' when asked about Looking Glass."
   echo "   Alternatively, connect via RDP:"
-  echo "     omarchy-windows-vm launch"
+  echo "     omarchy-windows-passthrough-vm launch"
   exit 1
 fi
 
@@ -244,10 +244,10 @@ if ! check_docker_running; then
   exit 1
 fi
 
-CONTAINER_STATUS=$(get_container_status "omarchy-windows")
+CONTAINER_STATUS=$(get_container_status "omarchy-windows-passthrough")
 if [[ "$CONTAINER_STATUS" != "running" ]]; then
   msg_error "Windows VM is not running"
-  echo "   Start: omarchy-windows-vm launch --keep-alive"
+  echo "   Start: omarchy-windows-passthrough-vm launch --keep-alive"
   exit 1
 fi
 

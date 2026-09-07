@@ -167,7 +167,7 @@ check_gpu_processes() {
 
     msg_warning "GPU is bound to vfio-pci and in use (likely by running VM)"
     echo "To unbind GPU:"
-    echo "   1. Stop your VM: omarchy-windows-vm stop"
+    echo "   1. Stop your VM: omarchy-windows-passthrough-vm stop"
     if [[ -n "$first_pid" ]]; then
       echo "   2. Or kill QEMU: sudo kill -9 $first_pid"
     else

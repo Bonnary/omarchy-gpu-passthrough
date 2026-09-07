@@ -52,6 +52,8 @@ create_backup_snapshot() {
     log_warn "Skipping Hyprland config backup - user home not found"
   elif [[ -f "$user_home/.config/hypr/hyprland.conf" ]]; then
     sudo cp -a "$user_home/.config/hypr/hyprland.conf" "$snapshot_dir/hyprland.conf" 2>/dev/null && files_backed_up+=("hyprland.conf")
+  elif [[ -f "$user_home/.config/hypr/hyprland.lua" ]]; then
+    sudo cp -a "$user_home/.config/hypr/hyprland.lua" "$snapshot_dir/hyprland.lua" 2>/dev/null && files_backed_up+=("hyprland.lua")
   fi
 
   if [[ "${#files_backed_up[@]}" -eq 0 ]]; then
@@ -893,7 +895,9 @@ configure_hyprland_igpu() {
     return 1
   fi
 
+  # Newer Omarchy uses hyprland.lua; older uses hyprland.conf
   local hypr_conf="$user_home/.config/hypr/hyprland.conf"
+  [[ -f "$hypr_conf" ]] || hypr_conf="$user_home/.config/hypr/hyprland.lua"
   if [[ ! -f "$hypr_conf" ]]; then
     msg_warning "Hyprland config not found - skipping Hyprland configuration"
     log_info "Hyprland config not found at $hypr_conf - user may not use Hyprland"
@@ -926,6 +930,7 @@ configure_hyprland_igpu() {
   # For MUX-less laptops: dGPU is NOT blacklisted (uses vfio-pci.ids)
   # EGL probing will still open /dev/nvidia* handles unless we force Mesa
   if [[ "$IS_MUXLESS_LAPTOP" == "true" ]]; then
+    create_gpu_symlink_udev_rule "$igpu_pci" "$user_home"
     configure_uwsm_env_muxless "$igpu_pci" "$user_home"
     msg_success "Hyprland: GPU passthrough environment configured (MUX-less)"
     return 0
@@ -1135,6 +1140,28 @@ export AQ_DRM_DEVICES=\"${drm_device}\""
   return 0
 }
 
+# Create udev rule for stable /dev/dri/igpu symlink keyed on the iGPU's PCI slot.
+# card0/card1 numbering shifts when the dGPU binds to vfio-pci; the symlink doesn't.
+create_gpu_symlink_udev_rule() {
+  local igpu_pci="$1"
+  local rules_file="/etc/udev/rules.d/90-gpu-passthrough-igpu-symlink.rules"
+
+  cat <<EOF | sudo tee "$rules_file" >/dev/null
+# GPU Passthrough: stable symlink for iGPU ($(date +%Y-%m-%d))
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", KERNELS=="$igpu_pci", SYMLINK+="dri/igpu"
+SUBSYSTEM=="drm", KERNEL=="renderD[0-9]*", KERNELS=="$igpu_pci", SYMLINK+="dri/igpu-rend"
+EOF
+
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger --subsystem-match=drm
+  if [[ -L /dev/dri/igpu ]]; then
+    msg_success "Stable GPU symlink created: /dev/dri/igpu"
+  else
+    msg_warning "Symlink /dev/dri/igpu not ready yet - will appear after reboot"
+  fi
+  return 0
+}
+
 # Unconfiguration Functions
 
 unconfigure_system_environment() {
@@ -1172,6 +1199,7 @@ unconfigure_hyprland_igpu() {
 
   # Clean Hyprland config
   local hypr_conf="$user_home/.config/hypr/hyprland.conf"
+  [[ -f "$hypr_conf" ]] || hypr_conf="$user_home/.config/hypr/hyprland.lua"
   if [[ -f "$hypr_conf" ]]; then
     if grep -qE "^env = (WLR_DRM_DEVICES|AQ_DRM_DEVICES|DRI_PRIME|LIBVA_DRIVER_NAME|__GLX_VENDOR_LIBRARY_NAME)," "$hypr_conf" ||
        grep -q "# GPU Passthrough Configuration" "$hypr_conf"; then
@@ -1620,7 +1648,7 @@ EOF
   • Dedicated GPU will be INACTIVE (reserved for VM, no native driver)
   • Connect ALL monitors to MOTHERBOARD ports (iGPU only)
   • Host display uses iGPU, dedicated GPU ready for VM
-  • VMs (omarchy-windows-vm) handle GPU automatically
+  • VMs (omarchy-windows-passthrough-vm) handle GPU automatically
   • For host use (CUDA/gaming): omarchy-gpu-passthrough mode host
 EOF
 
@@ -2017,7 +2045,7 @@ cmd_setup() {
   echo "Next steps:"
   echo "   1. Reboot system"
   echo "   2. Verify: omarchy-gpu-passthrough info verify"
-  echo "   3. Install Windows VM: omarchy-windows-vm install"
+  echo "   3. Install Windows VM: omarchy-windows-passthrough-vm install"
   echo ""
   msg_info "BIOS tip: Set \"Primary Display = IGD\" to avoid black screen"
   msg_warning "Reboot required to apply kernel parameters"
