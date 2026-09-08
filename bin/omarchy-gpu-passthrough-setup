@@ -1044,30 +1044,37 @@ configure_uwsm_env_amd_runtime() {
   # /dev/dri/igpu is stable across reboots, unlike card0/card1/card2
   local drm_device="/dev/dri/igpu"
 
-  # Verify symlink exists (created by udev rule)
-  if [[ ! -L "$drm_device" ]] && [[ ! -e "$drm_device" ]]; then
-    log_warn "Stable symlink $drm_device not found - udev rule may not be applied yet"
-    msg_warning "GPU symlink not ready (will work after reboot)"
-  fi
+  # Only restrict Hyprland to the iGPU if /dev/dri/igpu exists. A dangling
+  # AQ_DRM_DEVICES makes the session fail to start (login loop).
+  if [[ -e "$drm_device" ]]; then
+    log_info "Configuring UWSM env-hyprland for AMD runtime binding: iGPU=$igpu_pci → $drm_device"
 
-  log_info "Configuring UWSM env-hyprland for AMD runtime binding: iGPU=$igpu_pci → $drm_device"
+    # Configure env-hyprland for AQ_* variables (Hyprland-specific)
+    if ! _ensure_uwsm_file "$uwsm_env_hyprland" "$user_home"; then
+      msg_warning "Could not create UWSM env-hyprland file"
+      return 0
+    fi
 
-  # Configure env-hyprland for AQ_* variables (Hyprland-specific)
-  if ! _ensure_uwsm_file "$uwsm_env_hyprland" "$user_home"; then
-    msg_warning "Could not create UWSM env-hyprland file"
-    return 0
-  fi
-
-  local hyprland_content="# Use iGPU only - dGPU free for VM passthrough
+    local hyprland_content="# Use iGPU only - dGPU free for VM passthrough
 # Uses stable /dev/dri/igpu symlink (created by udev rule based on PCI slot)
 export AQ_DRM_DEVICES=\"${drm_device}\""
 
-  if ! _write_uwsm_section "$uwsm_env_hyprland" "$hyprland_content"; then
-    msg_warning "Could not write GPU passthrough configuration"
-    return 1
-  fi
+    if ! _write_uwsm_section "$uwsm_env_hyprland" "$hyprland_content"; then
+      msg_warning "Could not write GPU passthrough configuration"
+      return 1
+    fi
 
-  msg_info "UWSM env-hyprland: Restrict Hyprland to $drm_device (iGPU)"
+    msg_info "UWSM env-hyprland: Restrict Hyprland to $drm_device (iGPU)"
+  else
+    # Remove any stale AQ_DRM_DEVICES section to avoid a login loop.
+    if [[ -f "$uwsm_env_hyprland" ]]; then
+      local uwsm_use_sudo=""
+      [[ ! -w "$uwsm_env_hyprland" ]] && uwsm_use_sudo="sudo"
+      $uwsm_use_sudo sed -i '/# BEGIN GPU Passthrough/,/# END GPU Passthrough/d' "$uwsm_env_hyprland" 2>/dev/null
+    fi
+    log_warn "Stable symlink $drm_device not found - skipping AQ_DRM_DEVICES restriction"
+    msg_warning "GPU symlink $drm_device missing - not restricting Hyprland to iGPU"
+  fi
   return 0
 }
 
@@ -1087,10 +1094,15 @@ configure_uwsm_env_muxless() {
   # /dev/dri/igpu is stable across reboots, unlike card0/card1/card2
   local drm_device="/dev/dri/igpu"
 
-  # Verify symlink exists (created by udev rule)
-  if [[ ! -L "$drm_device" ]] && [[ ! -e "$drm_device" ]]; then
-    log_warn "Stable symlink $drm_device not found - udev rule may not be applied yet"
-    msg_warning "GPU symlink not ready (will work after reboot)"
+  # Verify the DRM device actually resolves. Writing AQ_DRM_DEVICES that points
+  # to a missing device makes Hyprland fail to init a render node, which crashes
+  # the session at login (login loop). Only force the iGPU if the device exists.
+  local drm_available=false
+  if [[ -e "$drm_device" ]]; then
+    drm_available=true
+  else
+    log_warn "Stable symlink $drm_device not found - skipping AQ_DRM_DEVICES restriction"
+    msg_warning "GPU symlink $drm_device missing - not restricting Hyprland to iGPU"
   fi
 
   log_info "Configuring UWSM for MUX-less: iGPU=$igpu_pci → $drm_device"
@@ -1121,20 +1133,32 @@ export __NV_PRIME_RENDER_OFFLOAD=0"
   log_info "UWSM env: Force Mesa EGL (prevents NVIDIA handle probing)"
 
   # Configure env-hyprland (Hyprland-specific AQ_* variables) ===
-  if ! _ensure_uwsm_file "$uwsm_env_hyprland" "$user_home"; then
-    msg_warning "Could not create UWSM env-hyprland file"
-    return 0
-  fi
+  # Only restrict Hyprland to the iGPU if /dev/dri/igpu exists. A dangling
+  # AQ_DRM_DEVICES would make the session fail to start (login loop).
+  if [[ "$drm_available" == "true" ]]; then
+    if ! _ensure_uwsm_file "$uwsm_env_hyprland" "$user_home"; then
+      msg_warning "Could not create UWSM env-hyprland file"
+      return 0
+    fi
 
-  local hyprland_content="# Use iGPU only - dGPU free for VM passthrough
+    local hyprland_content="# Use iGPU only - dGPU free for VM passthrough
 # Uses stable /dev/dri/igpu symlink (created by udev rule based on PCI slot)
 export AQ_DRM_DEVICES=\"${drm_device}\""
 
-  if ! _write_uwsm_section "$uwsm_env_hyprland" "$hyprland_content"; then
-    msg_warning "Could not write GPU passthrough configuration to env-hyprland"
-    return 1
+    if ! _write_uwsm_section "$uwsm_env_hyprland" "$hyprland_content"; then
+      msg_warning "Could not write GPU passthrough configuration to env-hyprland"
+      return 1
+    fi
+    log_info "UWSM env-hyprland: Restrict Hyprland to $drm_device (iGPU)"
+  else
+    # Remove any stale AQ_DRM_DEVICES section to avoid a login loop.
+    if [[ -f "$uwsm_env_hyprland" ]]; then
+      local uwsm_use_sudo=""
+      [[ ! -w "$uwsm_env_hyprland" ]] && uwsm_use_sudo="sudo"
+      $uwsm_use_sudo sed -i '/# BEGIN GPU Passthrough/,/# END GPU Passthrough/d' "$uwsm_env_hyprland" 2>/dev/null
+    fi
+    log_info "UWSM env-hyprland: AQ_DRM_DEVICES not set (device $drm_device unavailable)"
   fi
-  log_info "UWSM env-hyprland: Restrict Hyprland to $drm_device (iGPU)"
 
   msg_info "UWSM configured: Mesa EGL (env) + AQ_DRM_DEVICES (env-hyprland)"
   return 0
@@ -1145,6 +1169,15 @@ export AQ_DRM_DEVICES=\"${drm_device}\""
 create_gpu_symlink_udev_rule() {
   local igpu_pci="$1"
   local rules_file="/etc/udev/rules.d/90-gpu-passthrough-igpu-symlink.rules"
+
+  # udev KERNELS== matches the full parent device name, which always includes
+  # the PCI domain prefix (e.g. 0000:00:02.0). lspci reports the slot without
+  # it (00:02.0), so normalize to the fully-qualified address or the rule never
+  # matches and /dev/dri/igpu is never created, leaving AQ_DRM_DEVICES dangling.
+  if ! igpu_pci=$(normalize_pci_addr "$igpu_pci"); then
+    msg_error "Invalid iGPU PCI address: $igpu_pci"
+    return 1
+  fi
 
   cat <<EOF | sudo tee "$rules_file" >/dev/null
 # GPU Passthrough: stable symlink for iGPU ($(date +%Y-%m-%d))
